@@ -1,12 +1,22 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { Id } from "../../convex/_generated/dataModel";
 import { toast } from "sonner";
 
-export function SearchUsers() {
+type SearchUsersProps = {
+  initialSelectedUserId?: Id<"users"> | null;
+};
+
+export function SearchUsers({ initialSelectedUserId = null }: SearchUsersProps) {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedUserId, setSelectedUserId] = useState<Id<"users"> | null>(null);
+
+  useEffect(() => {
+    if (initialSelectedUserId) {
+      setSelectedUserId(initialSelectedUserId);
+    }
+  }, [initialSelectedUserId]);
   
   const searchResults = useQuery(
     api.profiles.searchUsers,
@@ -32,25 +42,35 @@ export function SearchUsers() {
     api.social.isFollowing,
     selectedUserId ? { userId: selectedUserId } : "skip"
   );
+  const currentUser = useQuery(api.auth.loggedInUser);
+  const isGuest = !!(currentUser as { isAnonymous?: boolean } | null)?.isAnonymous;
   
   const followUser = useMutation(api.social.followUser);
   const unfollowUser = useMutation(api.social.unfollowUser);
   
   const handleFollow = async (userId: Id<"users">) => {
+    if (isGuest) {
+      toast.error("Create an account to follow users.");
+      return;
+    }
     try {
       await followUser({ userId });
       toast.success("User followed!");
     } catch (error) {
-      toast.error("Failed to follow user");
+      toast.error(error instanceof Error ? error.message : "Failed to follow user");
     }
   };
   
   const handleUnfollow = async (userId: Id<"users">) => {
+    if (isGuest) {
+      toast.error("Create an account to follow users.");
+      return;
+    }
     try {
       await unfollowUser({ userId });
       toast.success("User unfollowed");
     } catch (error) {
-      toast.error("Failed to unfollow user");
+      toast.error(error instanceof Error ? error.message : "Failed to unfollow user");
     }
   };
 
@@ -128,17 +148,20 @@ export function SearchUsers() {
                 
                 {isFollowing !== undefined && (
                   <button
+                    disabled={isGuest}
                     onClick={() => isFollowing 
                       ? handleUnfollow(selectedUserId) 
                       : handleFollow(selectedUserId)
                     }
                     className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-                      isFollowing
+                      isGuest
+                        ? "bg-gray-100 text-gray-500 cursor-not-allowed"
+                        : isFollowing
                         ? "bg-gray-100 text-gray-700 hover:bg-gray-200"
                         : "bg-blue-600 text-white hover:bg-blue-700"
                     }`}
                   >
-                    {isFollowing ? "Following" : "Follow"}
+                    {isGuest ? "Create account to follow" : isFollowing ? "Following" : "Follow"}
                   </button>
                 )}
               </div>

@@ -9,7 +9,11 @@
  */
 
 import type * as auth from "../auth.js";
+import type * as files from "../files.js";
+import type * as functions_files from "../functions/files.js";
 import type * as http from "../http.js";
+import type * as messages from "../messages.js";
+import type * as player from "../player.js";
 import type * as posts from "../posts.js";
 import type * as profiles from "../profiles.js";
 import type * as router from "../router.js";
@@ -23,7 +27,11 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   auth: typeof auth;
+  files: typeof files;
+  "functions/files": typeof functions_files;
   http: typeof http;
+  messages: typeof messages;
+  player: typeof player;
   posts: typeof posts;
   profiles: typeof profiles;
   router: typeof router;

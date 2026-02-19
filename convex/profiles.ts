@@ -9,44 +9,48 @@ export const getProfile = query({
       .query("profiles")
       .withIndex("by_user", (q) => q.eq("userId", args.userId))
       .unique();
-    
+
     if (!profile) {
       const user = await ctx.db.get(args.userId);
-      return user ? {
-        userId: args.userId,
-        displayName: user.name || user.email || "Anonymous",
-        bio: null,
-        avatar: null,
-        isPublic: true,
-      } : null;
+      return user
+        ? {
+            userId: args.userId,
+            displayName: user.name || user.email || "Anonymous",
+            bio: null,
+            avatar: null,
+            isPublic: true,
+          }
+        : null;
     }
-    
+
     return profile;
   },
 });
 
 export const getCurrentUserProfile = query({
   args: {},
-  handler: async (ctx): Promise<any> => {
+  handler: async (ctx) => {
     const userId = await getAuthUserId(ctx);
     if (!userId) return null;
-    
+
     const profile = await ctx.db
       .query("profiles")
       .withIndex("by_user", (q) => q.eq("userId", userId))
       .unique();
-    
+
     if (!profile) {
       const user = await ctx.db.get(userId);
-      return user ? {
-        userId: userId,
-        displayName: user.name || user.email || "Anonymous",
-        bio: null,
-        avatar: null,
-        isPublic: true,
-      } : null;
+      return user
+        ? {
+            userId,
+            displayName: user.name || user.email || "Anonymous",
+            bio: null,
+            avatar: null,
+            isPublic: true,
+          }
+        : null;
     }
-    
+
     return profile;
   },
 });
@@ -60,12 +64,12 @@ export const updateProfile = mutation({
   handler: async (ctx, args) => {
     const userId = await getAuthUserId(ctx);
     if (!userId) throw new Error("Not authenticated");
-    
+
     const existingProfile = await ctx.db
       .query("profiles")
       .withIndex("by_user", (q) => q.eq("userId", userId))
       .unique();
-    
+
     if (existingProfile) {
       await ctx.db.patch(existingProfile._id, {
         displayName: args.displayName,
@@ -83,30 +87,69 @@ export const updateProfile = mutation({
   },
 });
 
-export const searchUsers = query({
-  args: { searchTerm: v.string() },
+export const updateAvatar = mutation({
+  args: {
+    avatarId: v.id("_storage"),
+  },
   handler: async (ctx, args) => {
-    const users = await ctx.db.query("users").collect();
-    const profiles = await ctx.db.query("profiles").collect();
-    
-    const profileMap = new Map(profiles.map(p => [p.userId, p]));
-    
-    return users
-      .filter(user => {
-        const profile = profileMap.get(user._id);
-        const displayName = profile?.displayName || user.name || user.email || "";
-        return displayName.toLowerCase().includes(args.searchTerm.toLowerCase()) &&
-               (profile?.isPublic !== false);
-      })
-      .slice(0, 10)
-      .map(user => {
-        const profile = profileMap.get(user._id);
-        return {
-          userId: user._id,
-          displayName: profile?.displayName || user.name || user.email || "Anonymous",
-          bio: profile?.bio,
-          avatar: profile?.avatar,
-        };
+    const userId = await getAuthUserId(ctx);
+    if (!userId) throw new Error("Not authenticated");
+
+    const existingProfile = await ctx.db
+      .query("profiles")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .unique();
+
+    if (existingProfile) {
+      await ctx.db.patch(existingProfile._id, {
+        avatar: args.avatarId,
       });
+    } else {
+      const user = await ctx.db.get(userId);
+
+      await ctx.db.insert("profiles", {
+        userId,
+        displayName: user?.name || user?.email || "Anonymous",
+        bio: undefined,
+        avatar: args.avatarId,
+        isPublic: true,
+      });
+    }
   },
 });
+
+export const searchUsers = query({
+  args: {
+    searchTerm: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const currentUserId = await getAuthUserId(ctx);
+    const term = args.searchTerm.trim().toLowerCase();
+    if (!term) return [];
+
+    const profiles = await ctx.db.query("profiles").collect();
+
+    const results = await Promise.all(
+      profiles
+        .filter((profile) => profile.userId !== currentUserId)
+        .filter((profile) => {
+          const displayName = profile.displayName.toLowerCase();
+          const bio = (profile.bio || "").toLowerCase();
+          return displayName.includes(term) || bio.includes(term);
+        })
+        .slice(0, 20)
+        .map(async (profile) => {
+          const user = await ctx.db.get(profile.userId);
+          return {
+            userId: profile.userId,
+            displayName: profile.displayName || user?.name || user?.email || "Anonymous",
+            bio: profile.bio,
+            isPublic: profile.isPublic,
+          };
+        }),
+    );
+
+    return results;
+  },
+});
+

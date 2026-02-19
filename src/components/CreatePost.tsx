@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useMutation } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { toast } from "sonner";
 
@@ -14,6 +14,8 @@ export function CreatePost() {
   const [tags, setTags] = useState("");
   
   const createPost = useMutation(api.posts.createPost);
+  const currentUser = useQuery(api.auth.loggedInUser);
+  const isGuest = !!(currentUser as { isAnonymous?: boolean } | null)?.isAnonymous;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -53,10 +55,16 @@ export function CreatePost() {
     return (
       <div className="bg-white rounded-lg shadow-sm border p-4">
         <button
-          onClick={() => setIsOpen(true)}
+          onClick={() => {
+            if (isGuest) {
+              toast.error("Create an account to share posts publicly.");
+              return;
+            }
+            setIsOpen(true);
+          }}
           className="w-full text-left px-4 py-3 bg-gray-50 rounded-lg text-gray-600 hover:bg-gray-100 transition-colors"
         >
-          What music are you listening to? 🎵
+          {isGuest ? "Create an account to post publicly" : "What music are you listening to? 🎵"}
         </button>
       </div>
     );
