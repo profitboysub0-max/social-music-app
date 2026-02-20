@@ -519,10 +519,10 @@ export function PostCard({
         )}
       </div>
 
-      <div className="flex items-center gap-4 pt-2 border-t">
+      <div className="flex flex-wrap items-center gap-2 pt-2 border-t">
         <button
           onClick={handleLike}
-          className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${
+          className={`inline-flex items-center gap-2 px-3 py-2 rounded-lg transition-colors shrink-0 ${
             post.isLiked
               ? "bg-red-50 text-red-600 hover:bg-red-100"
               : "text-gray-600 hover:bg-gray-50"
@@ -534,7 +534,7 @@ export function PostCard({
 
         <button
           onClick={() => setShowComments((current) => !current)}
-          className="flex items-center gap-2 px-3 py-2 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors"
+          className="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors shrink-0"
         >
           <span className="text-lg">💬</span>
           <span className="font-medium">{post.commentsCount}</span>
@@ -542,7 +542,7 @@ export function PostCard({
 
         <button
           onClick={handleRepost}
-          className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${
+          className={`inline-flex items-center gap-2 px-3 py-2 rounded-lg transition-colors shrink-0 ${
             post.isReposted
               ? "bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
               : "text-gray-600 hover:bg-gray-50"
@@ -552,7 +552,7 @@ export function PostCard({
           <span className="font-medium">{post.repostsCount ?? 0}</span>
         </button>
 
-        <div className="flex items-center gap-2 px-3 py-2 rounded-lg text-gray-600">
+        <div className="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-gray-600 shrink-0">
           <span className="text-lg">▶</span>
           <span className="font-medium">{post.playCount ?? 0}</span>
         </div>
@@ -560,44 +560,50 @@ export function PostCard({
         {post.type === "song" ? (
           <button
             onClick={handleSaveSong}
-            className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${
+            className={`inline-flex items-center gap-2 px-3 py-2 rounded-lg transition-colors shrink-0 ${
               isSongSaved
                 ? "bg-yellow-50 text-yellow-700"
                 : "text-gray-600 hover:bg-gray-50"
             }`}
           >
             <span className="text-lg">{isSongSaved ? "⭐" : "☆"}</span>
-            <span className="font-medium text-sm">{isSongSaved ? "Saved" : "Save song"}</span>
+            <span className="font-medium text-sm">
+              <span className="sm:hidden">{isSongSaved ? "Saved" : "Save"}</span>
+              <span className="hidden sm:inline">{isSongSaved ? "Saved" : "Save song"}</span>
+            </span>
           </button>
         ) : null}
 
         {(post.type === "song" || post.type === "playlist") ? (
           <button
             onClick={handleAddToPlaylist}
-            className="flex items-center gap-2 px-3 py-2 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors"
+            className="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors shrink-0"
           >
             <span className="text-lg">➕</span>
-            <span className="font-medium text-sm">Add to playlist</span>
+            <span className="font-medium text-sm">
+              <span className="sm:hidden">Add</span>
+              <span className="hidden sm:inline">Add to playlist</span>
+            </span>
           </button>
         ) : null}
 
         {(post.type === "song" || post.type === "playlist") ? (
           <button
             onClick={handleShare}
-            className="flex items-center gap-2 px-3 py-2 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors"
+            className="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors shrink-0"
           >
             <span className="text-lg">📤</span>
-            <span className="font-medium text-sm">Share</span>
+            <span className="font-medium text-sm hidden sm:inline">Share</span>
           </button>
         ) : null}
 
         {(post.type === "song" || post.type === "playlist") ? (
           <button
             onClick={handleCopyLink}
-            className="flex items-center gap-2 px-3 py-2 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors"
+            className="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors shrink-0"
           >
             <span className="text-lg">🔗</span>
-            <span className="font-medium text-sm">Copy link</span>
+            <span className="font-medium text-sm hidden sm:inline">Copy link</span>
           </button>
         ) : null}
 
