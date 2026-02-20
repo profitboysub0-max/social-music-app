@@ -62,9 +62,9 @@ export function CreatePost() {
             }
             setIsOpen(true);
           }}
-          className="w-full text-left px-4 py-3 bg-gray-50 rounded-lg text-gray-600 hover:bg-gray-100 transition-colors"
+          className="w-full text-left px-4 py-3 bg-blue-50 border border-blue-100 rounded-lg text-blue-800 hover:bg-blue-100 transition-colors"
         >
-          {isGuest ? "Create an account to post publicly" : "What music are you listening to? 🎵"}
+          {isGuest ? "Create an account to share songs publicly" : "Share a song with your feed 🎵"}
         </button>
       </div>
     );

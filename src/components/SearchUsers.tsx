@@ -37,6 +37,10 @@ export function SearchUsers({ initialSelectedUserId = null }: SearchUsersProps) 
     api.social.getFollowStats,
     selectedUserId ? { userId: selectedUserId } : "skip"
   );
+  const selectedUserPresence = useQuery(
+    api.player.getUserPresence,
+    selectedUserId ? { userId: selectedUserId } : "skip"
+  );
   
   const isFollowing = useQuery(
     api.social.isFollowing,
@@ -169,6 +173,12 @@ export function SearchUsers({ initialSelectedUserId = null }: SearchUsersProps) 
               {selectedUserProfile.bio && (
                 <p className="text-gray-700 mb-3">{selectedUserProfile.bio}</p>
               )}
+              {selectedUserPresence?.isActive && selectedUserPresence.trackTitle ? (
+                <div className="mb-3 inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 text-sm font-medium">
+                  <span>🟢</span>
+                  <span>Listening now: {selectedUserPresence.trackTitle}</span>
+                </div>
+              ) : null}
               
               {followStats && (
                 <div className="flex gap-4 text-sm text-gray-600">

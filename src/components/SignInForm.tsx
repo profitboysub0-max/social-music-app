@@ -4,7 +4,7 @@ import { toast } from "sonner";
 
 export function SignInForm() {
   const { signIn } = useAuthActions();
-  const [flow, setFlow] = useState<"signIn" | "signUp">("signIn");
+  const [flow, setFlow] = useState<"signIn" | "signUp">("signUp");
   const [submitting, setSubmitting] = useState(false);
 
   const getErrorMessage = (error: unknown) => {
@@ -48,6 +48,14 @@ export function SignInForm() {
 
   return (
     <div className="max-w-md mx-auto w-full bg-white border rounded-lg p-6 shadow-sm space-y-4">
+      <div className="text-center">
+        <h2 className="text-lg font-semibold text-gray-900">
+          {flow === "signUp" ? "Create your account in under 30 seconds" : "Welcome back"}
+        </h2>
+        <p className="text-sm text-gray-600 mt-1">
+          Follow people, share songs, and build your daily listening habit.
+        </p>
+      </div>
       <form
         className="space-y-3"
         onSubmit={async (e) => {
@@ -70,6 +78,7 @@ export function SignInForm() {
           name="email"
           placeholder="Email"
           required
+          autoComplete="email"
           className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
         />
         <input
@@ -77,6 +86,7 @@ export function SignInForm() {
           name="password"
           placeholder="Password"
           required
+          autoComplete={flow === "signUp" ? "new-password" : "current-password"}
           className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
         />
         <button
@@ -84,7 +94,7 @@ export function SignInForm() {
           disabled={submitting}
           className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors font-medium"
         >
-          {flow === "signIn" ? "Sign in" : "Sign up"}
+          {flow === "signIn" ? "Sign in" : "Create account"}
         </button>
       </form>
 

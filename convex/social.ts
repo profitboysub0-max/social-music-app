@@ -1,6 +1,7 @@
 import { v } from "convex/values";
 import { query, mutation } from "./_generated/server";
 import { getAuthUserId } from "@convex-dev/auth/server";
+import { internal } from "./_generated/api";
 import { Id } from "./_generated/dataModel";
 
 type NotificationType =
@@ -9,6 +10,9 @@ type NotificationType =
   | "follow"
   | "mention"
   | "repost"
+  | "share"
+  | "friend_listening"
+  | "network_trending"
   | "system_update";
 
 async function getDisplayName(ctx: any, userId: Id<"users">) {
@@ -63,11 +67,14 @@ async function upsertNotification(
         createdAt: now,
         readAt: undefined,
       });
+      await ctx.scheduler.runAfter(0, internal.push.dispatchPushForNotification, {
+        notificationId: existing._id,
+      });
       return existing._id;
     }
   }
 
-  return await ctx.db.insert("notifications", {
+  const notificationId = await ctx.db.insert("notifications", {
     recipientId: args.recipientId,
     actorId: args.actorId,
     type: args.type,
@@ -79,6 +86,12 @@ async function upsertNotification(
     readAt: undefined,
     createdAt: now,
   });
+
+  await ctx.scheduler.runAfter(0, internal.push.dispatchPushForNotification, {
+    notificationId,
+  });
+
+  return notificationId;
 }
 
 async function deleteNotificationByGroup(

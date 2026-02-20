@@ -17,12 +17,17 @@ interface Post {
   likesCount: number;
   commentsCount: number;
   repostsCount: number;
+  playCount: number;
   _creationTime: number;
   author: {
     id: Id<"users">;
     displayName: string;
     avatar?: Id<"_storage">;
     avatarUrl?: string | null;
+    listeningNow?: {
+      trackTitle: string;
+      startedAt: number;
+    } | null;
   };
   isLiked: boolean;
   isReposted: boolean;
@@ -31,13 +36,27 @@ interface Post {
 interface PostCardProps {
   post: Post;
   focusCommentId?: Id<"comments"> | null;
+  onNavigateToProfile?: (userId: Id<"users">) => void;
 }
 
-export function PostCard({ post, focusCommentId = null }: PostCardProps) {
+export function PostCard({
+  post,
+  focusCommentId = null,
+  onNavigateToProfile,
+}: PostCardProps) {
   const toggleLike = useMutation(api.posts.toggleLike);
   const toggleRepost = useMutation(api.posts.toggleRepost);
+  const recordPlay = useMutation(api.posts.recordPlay);
+  const saveSongFromPost = useMutation(api.playlists.saveSongFromPost);
+  const addTrackToPlaylist = useMutation(api.playlists.addTrackToPlaylist);
+  const createShareReference = useMutation(api.posts.createShareReference);
   const addComment = useMutation(api.posts.addComment);
   const deletePost = useMutation(api.posts.deletePost);
+  const isSongSaved = useQuery(
+    api.playlists.isSongSaved,
+    post.type === "song" ? { postId: post._id } : "skip",
+  );
+  const writablePlaylists = useQuery(api.playlists.getWritablePlaylists);
   const currentUser = useQuery(api.auth.loggedInUser);
   const isGuest = !!(currentUser as { isAnonymous?: boolean } | null)?.isAnonymous;
   const comments = useQuery(api.posts.getComments, { postId: post._id });
@@ -199,6 +218,7 @@ export function PostCard({ post, focusCommentId = null }: PostCardProps) {
 
   const handleMusicClick = (url: string) => {
     if (!url) return;
+    void recordPlay({ postId: post._id, trackUrl: url }).catch(() => undefined);
 
     if (isDirectAudioUrl(url)) {
       setEmbedUrl(null);
@@ -221,25 +241,212 @@ export function PostCard({ post, focusCommentId = null }: PostCardProps) {
     toast.error("This link can't be embedded in-app yet. Try a direct audio URL.");
   };
 
+  const getPrimaryTrackUrl = () => post.spotifyUrl || post.appleMusicUrl || post.youtubeUrl;
+
+  const handleSaveSong = async () => {
+    if (isGuest) {
+      toast.error("Create an account to save songs.");
+      return;
+    }
+    try {
+      await saveSongFromPost({ postId: post._id });
+      toast.success("Song saved.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to save song");
+    }
+  };
+
+  const handleAddToPlaylist = async () => {
+    if (isGuest) {
+      toast.error("Create an account to use playlists.");
+      return;
+    }
+    if (!writablePlaylists || writablePlaylists.length === 0) {
+      toast.error("Create a playlist first.");
+      return;
+    }
+
+    const options = writablePlaylists
+      .map((playlist, index) => `${index + 1}. ${playlist.name}`)
+      .join("\n");
+    const selection = window.prompt(`Select playlist number:\n${options}`);
+    if (!selection) return;
+    const selectedIndex = Number(selection) - 1;
+    if (!Number.isInteger(selectedIndex) || selectedIndex < 0 || selectedIndex >= writablePlaylists.length) {
+      toast.error("Invalid selection.");
+      return;
+    }
+
+    const selected = writablePlaylists[selectedIndex];
+    try {
+      await addTrackToPlaylist({
+        playlistId: selected._id,
+        sourcePostId: post._id,
+        title: post.title,
+        url: getPrimaryTrackUrl() || undefined,
+        notes: post.content,
+      });
+      toast.success(`Added to ${selected.name}.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to add to playlist");
+    }
+  };
+
+  const createShareCardBlob = async (shareUrl: string) => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 1080;
+    canvas.height = 1080;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("Could not create share card");
+
+    const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+    gradient.addColorStop(0, "#0f172a");
+    gradient.addColorStop(0.5, "#1d4ed8");
+    gradient.addColorStop(1, "#0ea5e9");
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.fillStyle = "rgba(255,255,255,0.16)";
+    ctx.fillRect(64, 64, canvas.width - 128, canvas.height - 128);
+
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "bold 56px sans-serif";
+    ctx.fillText(`🎧 ${post.author.displayName} is listening to`, 108, 220);
+
+    ctx.font = "bold 78px sans-serif";
+    ctx.fillText(post.title.slice(0, 28), 108, 360);
+
+    ctx.font = "42px sans-serif";
+    const artistLine = post.content.split("\n")[0]?.slice(0, 40) || "Music vibes";
+    ctx.fillText(artistLine, 108, 430);
+
+    ctx.font = "bold 48px sans-serif";
+    ctx.fillText("Listen with me →", 108, 620);
+
+    ctx.font = "32px monospace";
+    ctx.fillText(shareUrl, 108, 690);
+
+    ctx.font = "32px sans-serif";
+    ctx.fillStyle = "rgba(255,255,255,0.9)";
+    ctx.fillText("Put Me On", 108, 920);
+
+    const blob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob((file) => resolve(file), "image/png"),
+    );
+    if (!blob) throw new Error("Failed to render share card");
+    return blob;
+  };
+
+  const buildShareText = () => {
+    const context = post.content.split("\n")[0]?.trim();
+    const cleanContext = context ? ` - ${context.slice(0, 60)}` : "";
+    return `${post.author.displayName} is listening to "${post.title}"${cleanContext}. Listen with me.`;
+  };
+
+  const getSharePayload = async () => {
+    const { code } = await createShareReference({ postId: post._id });
+    const shareUrl = `${window.location.origin}/r/${code}`;
+    const shareText = buildShareText();
+    const shareTitle = `${post.author.displayName} is listening`;
+    // Optional later: replace with dynamic OG image endpoint, e.g. `${window.location.origin}/og/${code}.png`.
+    const ogImageUrl = "";
+    return { code, shareUrl, shareText, shareTitle, ogImageUrl };
+  };
+
+  const isMobileDevice = () =>
+    /Android|iPhone|iPad|iPod|Mobile/i.test(window.navigator.userAgent);
+
+  const handleShare = async () => {
+    try {
+      const { code, shareUrl, shareText, shareTitle } = await getSharePayload();
+      const blob = await createShareCardBlob(shareUrl);
+      const file = new File([blob], `listening-${code}.png`, { type: "image/png" });
+      const hasNativeShare = typeof navigator.share === "function";
+      const mobile = isMobileDevice();
+
+      if (hasNativeShare && mobile) {
+        if (navigator.canShare?.({ files: [file] })) {
+          await navigator.share({
+            title: shareTitle,
+            text: shareText,
+            url: shareUrl,
+            files: [file],
+          });
+          return;
+        }
+
+        await navigator.share({
+          title: shareTitle,
+          text: shareText,
+          url: shareUrl,
+        });
+        return;
+      }
+
+      try {
+        await navigator.clipboard.writeText(shareUrl);
+      } catch {
+        // ignore clipboard errors
+      }
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = `listening-${code}.png`;
+      link.click();
+      URL.revokeObjectURL(link.href);
+      toast.success("Share card downloaded and link copied.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to share");
+    }
+  };
+
+  const handleCopyLink = async () => {
+    try {
+      const { shareUrl } = await getSharePayload();
+      await navigator.clipboard.writeText(shareUrl);
+      toast.success("Link copied.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to copy link");
+    }
+  };
+
+
   return (
     <div id={`post-${post._id}`} className="bg-white rounded-lg shadow-sm border p-6 space-y-4">
       <div className="flex items-center gap-3">
-        {post.author.avatarUrl ? (
-          <img
-            src={post.author.avatarUrl}
-            alt={post.author.displayName}
-            className="w-10 h-10 rounded-full object-cover border border-gray-200"
-          />
-        ) : (
-          <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center text-white font-semibold">
-            {post.author.displayName.charAt(0).toUpperCase()}
-          </div>
-        )}
+        <button
+          type="button"
+          onClick={() => onNavigateToProfile?.(post.author.id)}
+          className="shrink-0"
+          aria-label={`View ${post.author.displayName}'s profile`}
+        >
+          {post.author.avatarUrl ? (
+            <img
+              src={post.author.avatarUrl}
+              alt={post.author.displayName}
+              className="w-10 h-10 rounded-full object-cover border border-gray-200"
+            />
+          ) : (
+            <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center text-white font-semibold">
+              {post.author.displayName.charAt(0).toUpperCase()}
+            </div>
+          )}
+        </button>
         <div className="flex-1">
           <div className="flex items-center gap-2">
-            <span className="font-medium text-gray-900">{post.author.displayName}</span>
+            <button
+              type="button"
+              onClick={() => onNavigateToProfile?.(post.author.id)}
+              className="font-medium text-gray-900 hover:underline"
+            >
+              {post.author.displayName}
+            </button>
             <span className="text-lg">{getPostIcon()}</span>
           </div>
+          {post.author.listeningNow?.trackTitle ? (
+            <div className="text-xs text-emerald-700 font-medium">
+              Listening now: {post.author.listeningNow.trackTitle}
+            </div>
+          ) : null}
           <div className="text-sm text-gray-500">{formatDate(post._creationTime)}</div>
         </div>
         {currentUser?._id === post.author.id ? (
@@ -344,6 +551,56 @@ export function PostCard({ post, focusCommentId = null }: PostCardProps) {
           <span className="text-lg">🔁</span>
           <span className="font-medium">{post.repostsCount ?? 0}</span>
         </button>
+
+        <div className="flex items-center gap-2 px-3 py-2 rounded-lg text-gray-600">
+          <span className="text-lg">▶</span>
+          <span className="font-medium">{post.playCount ?? 0}</span>
+        </div>
+
+        {post.type === "song" ? (
+          <button
+            onClick={handleSaveSong}
+            className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${
+              isSongSaved
+                ? "bg-yellow-50 text-yellow-700"
+                : "text-gray-600 hover:bg-gray-50"
+            }`}
+          >
+            <span className="text-lg">{isSongSaved ? "⭐" : "☆"}</span>
+            <span className="font-medium text-sm">{isSongSaved ? "Saved" : "Save song"}</span>
+          </button>
+        ) : null}
+
+        {(post.type === "song" || post.type === "playlist") ? (
+          <button
+            onClick={handleAddToPlaylist}
+            className="flex items-center gap-2 px-3 py-2 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors"
+          >
+            <span className="text-lg">➕</span>
+            <span className="font-medium text-sm">Add to playlist</span>
+          </button>
+        ) : null}
+
+        {(post.type === "song" || post.type === "playlist") ? (
+          <button
+            onClick={handleShare}
+            className="flex items-center gap-2 px-3 py-2 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors"
+          >
+            <span className="text-lg">📤</span>
+            <span className="font-medium text-sm">Share</span>
+          </button>
+        ) : null}
+
+        {(post.type === "song" || post.type === "playlist") ? (
+          <button
+            onClick={handleCopyLink}
+            className="flex items-center gap-2 px-3 py-2 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors"
+          >
+            <span className="text-lg">🔗</span>
+            <span className="font-medium text-sm">Copy link</span>
+          </button>
+        ) : null}
+
       </div>
 
       <div className="space-y-3 border-t pt-4">

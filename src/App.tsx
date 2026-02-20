@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { useConvexAuth, useQuery } from "convex/react";
+import { useConvex, useConvexAuth, useMutation, useQuery } from "convex/react";
 import { api } from "../convex/_generated/api";
 import { Id } from "../convex/_generated/dataModel";
 import { Toaster } from "sonner";
@@ -12,10 +12,19 @@ import { SignInForm } from "./components/SignInForm";
 import { NotificationsPanel } from "./components/NotificationsPanel";
 import { SignOutButton } from "./SignOutButton";
 import { DirectMessages } from "./components/DirectMessages";
+import { PlaylistsPanel } from "./components/PlaylistsPanel";
 
 export default function App() {
+  const convex = useConvex();
   const [activeTab, setActiveTab] = useState<
-    "home" | "public" | "feed" | "profile" | "search" | "notifications" | "messages"
+    | "home"
+    | "public"
+    | "feed"
+    | "profile"
+    | "search"
+    | "notifications"
+    | "messages"
+    | "playlists"
   >("home");
   const [focusedPostId, setFocusedPostId] = useState<Id<"posts"> | null>(null);
   const [focusedCommentId, setFocusedCommentId] = useState<Id<"comments"> | null>(null);
@@ -34,7 +43,57 @@ export default function App() {
     window.localStorage.setItem("theme", isNightMode ? "night" : "day");
   }, [isNightMode]);
 
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const tab = params.get("tab");
+    const postId = params.get("postId");
+    const commentId = params.get("commentId");
+    const userId = params.get("userId");
+
+    if (
+      tab === "notifications" ||
+      tab === "feed" ||
+      tab === "search" ||
+      tab === "playlists"
+    ) {
+      setActiveTab(tab);
+    }
+    if (postId) {
+      setFocusedPostId(postId as Id<"posts">);
+    }
+    if (commentId) {
+      setFocusedCommentId(commentId as Id<"comments">);
+    }
+    if (userId) {
+      setSelectedUserId(userId as Id<"users">);
+    }
+  }, []);
+
+  useEffect(() => {
+    const run = async () => {
+      const pathMatch = window.location.pathname.match(/^\/r\/([a-z0-9]+)$/i);
+      if (!pathMatch) return;
+      const code = pathMatch[1];
+      try {
+        const ref = await convex.query(api.posts.resolveShareReference, { code });
+        if (!ref?.postId) return;
+        setFocusedPostId(ref.postId);
+        setFocusedCommentId(null);
+        setActiveTab("feed");
+        const url = new URL(window.location.href);
+        url.pathname = "/";
+        url.searchParams.set("tab", "feed");
+        url.searchParams.set("postId", String(ref.postId));
+        window.history.replaceState({}, "", url.toString());
+      } catch {
+        // Ignore invalid share code lookups.
+      }
+    };
+    void run();
+  }, [convex]);
+
   const { isAuthenticated, isLoading } = useConvexAuth();
+  const ensureSeedWarmWelcome = useMutation(api.growth.ensureSeedWarmWelcome);
   const currentUser = useQuery(api.auth.loggedInUser);
   const unreadNotificationsCount = useQuery(api.social.getUnreadNotificationCount);
   const unreadMessagesCount = useQuery(api.messages.getUnreadMessageCount);
@@ -43,6 +102,11 @@ export default function App() {
   const showNav = isSignedIn;
   const notificationsCount = unreadNotificationsCount ?? 0;
   const messagesCount = unreadMessagesCount ?? 0;
+
+  useEffect(() => {
+    if (!currentUser || (currentUser as { isAnonymous?: boolean }).isAnonymous) return;
+    void ensureSeedWarmWelcome({}).catch(() => undefined);
+  }, [currentUser, ensureSeedWarmWelcome]);
 
   const handleNavigateToPost = (postId: Id<"posts">, commentId?: Id<"comments"> | null) => {
     setFocusedPostId(postId);
@@ -69,21 +133,29 @@ export default function App() {
             <p className="text-gray-600 mt-1">
               Jump into your feed, discover new creators, and post what you are listening to.
             </p>
-            <button
-              onClick={() => setActiveTab("profile")}
-              className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
-            >
-              Go to Profile Picture
-            </button>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button
+                onClick={() => setActiveTab("feed")}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
+              >
+                Share a song now
+              </button>
+              <button
+                onClick={() => setActiveTab("profile")}
+                className="px-4 py-2 border border-gray-200 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors font-medium"
+              >
+                Edit profile
+              </button>
+            </div>
           </div>
           <CreatePost />
-          <MusicFeed scope="public" />
+          <MusicFeed scope="public" onNavigateToProfile={handleNavigateToProfile} />
         </div>
       );
     }
 
     if (activeTab === "public") {
-      return <MusicFeed scope="public" />;
+      return <MusicFeed scope="public" onNavigateToProfile={handleNavigateToProfile} />;
     }
 
     if (activeTab === "feed") {
@@ -95,6 +167,7 @@ export default function App() {
             focusPostId={focusedPostId}
             focusCommentId={focusedCommentId}
             onFocusHandled={clearFocus}
+            onNavigateToProfile={handleNavigateToProfile}
           />
         </>
       );
@@ -125,6 +198,10 @@ export default function App() {
         );
       }
       return <DirectMessages />;
+    }
+
+    if (activeTab === "playlists") {
+      return <PlaylistsPanel />;
     }
 
     return <UserProfile />;
@@ -192,6 +269,16 @@ export default function App() {
                   Discover
                 </button>
                 <button
+                  onClick={() => setActiveTab("playlists")}
+                  className={`px-3 py-2 rounded-lg ${
+                    activeTab === "playlists"
+                      ? "bg-blue-100 text-blue-700"
+                      : "text-gray-600 hover:text-gray-900"
+                  }`}
+                >
+                  Playlists
+                </button>
+                <button
                   onClick={() => setActiveTab("profile")}
                   className={`px-3 py-2 rounded-lg ${
                     activeTab === "profile"
@@ -246,12 +333,22 @@ export default function App() {
         {isSignedIn ? (
           renderMainContent()
         ) : (
-          <div className="text-center py-10 md:py-16 space-y-4">
+          <div className="text-center py-8 md:py-14 space-y-5">
             <div className="entrance-logo text-5xl md:text-6xl">🎵</div>
-            <h1 className="entrance-text text-4xl font-bold">Welcome to Put Me On</h1>
-            <p className="entrance-text text-lg text-gray-600 mb-4 max-w-2xl mx-auto">
-              Sign in to build your personalized feed, follow tastemakers, and stay ahead of the sound.
+            <h1 className="entrance-text text-4xl font-bold">Put Me On</h1>
+            <p className="entrance-text text-lg text-gray-700 mb-1 max-w-2xl mx-auto">
+              A social music app where you share tracks, discover new sounds, and see what friends are listening to in real time.
             </p>
+            <div className="entrance-text max-w-2xl mx-auto text-left sm:text-center">
+              <div className="inline-flex flex-col gap-2 text-sm text-gray-600">
+                <span>✅ Share songs and playlists in one tap</span>
+                <span>✅ Follow creators and get live listening updates</span>
+                <span>✅ Save tracks and build collaborative playlists</span>
+              </div>
+            </div>
+            <div className="text-sm text-blue-700 font-medium">
+              Sign up takes under 30 seconds.
+            </div>
             {isLoading ? <p className="text-sm text-gray-500 mb-3">Connecting to auth...</p> : null}
             <div className="entrance-button">
               <SignInForm />

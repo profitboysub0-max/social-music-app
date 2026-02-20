@@ -53,6 +53,21 @@ select {
   border-radius: 14px;
 }
 
+@media (max-width: 768px) {
+  button,
+  input,
+  textarea,
+  select {
+    min-height: 44px;
+  }
+
+  main {
+    padding-left: 14px !important;
+    padding-right: 14px !important;
+    padding-bottom: calc(8.5rem + env(safe-area-inset-bottom, 0px)) !important;
+  }
+}
+
 button:not(:disabled):hover {
   transform: translateY(-1px);
 }

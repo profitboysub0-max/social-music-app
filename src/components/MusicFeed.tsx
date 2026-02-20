@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useConvex } from "convex/react";
+import { useConvex, useMutation, useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { Id } from "../../convex/_generated/dataModel";
 import { PostCard } from "./PostCard";
+import { toast } from "sonner";
 
 const PAGE_SIZE = 20;
 
@@ -18,11 +19,16 @@ type FeedPost = {
   likesCount: number;
   commentsCount: number;
   repostsCount: number;
+  playCount: number;
   _creationTime: number;
   author: {
     id: Id<"users">;
     displayName: string;
     avatar?: Id<"_storage">;
+    listeningNow?: {
+      trackTitle: string;
+      startedAt: number;
+    } | null;
   };
   isLiked: boolean;
   isReposted: boolean;
@@ -33,6 +39,7 @@ type MusicFeedProps = {
   focusPostId?: Id<"posts"> | null;
   focusCommentId?: Id<"comments"> | null;
   onFocusHandled?: () => void;
+  onNavigateToProfile?: (userId: Id<"users">) => void;
 };
 
 export function MusicFeed({
@@ -40,8 +47,11 @@ export function MusicFeed({
   focusPostId = null,
   focusCommentId = null,
   onFocusHandled,
+  onNavigateToProfile,
 }: MusicFeedProps) {
   const convex = useConvex();
+  const currentUser = useQuery(api.auth.loggedInUser);
+  const seedStarterFeed = useMutation(api.posts.seedStarterFeed);
   const [posts, setPosts] = useState<FeedPost[]>([]);
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [isLoading, setIsLoading] = useState(true);
@@ -184,6 +194,7 @@ export function MusicFeed({
   }
 
   if (posts.length === 0) {
+    const canSeed = !!currentUser && !(currentUser as { isAnonymous?: boolean }).isAnonymous;
     return (
       <div className="text-center py-12 bg-white rounded-lg shadow-sm border px-6">
         <div className="text-4xl mb-4">🎵</div>
@@ -195,6 +206,28 @@ export function MusicFeed({
             <p className="text-gray-600 max-w-md mx-auto">
               Be the first to share something with the community.
             </p>
+            {canSeed ? (
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    const result = await seedStarterFeed({});
+                    if (result.inserted > 0) {
+                      toast.success(`Seeded ${result.inserted} starter posts.`);
+                      setIsLoading(true);
+                      await fetchFeed(visibleCount);
+                    } else {
+                      toast.message("Feed already has posts. Use your own content next.");
+                    }
+                  } catch (error) {
+                    toast.error(error instanceof Error ? error.message : "Failed to seed feed");
+                  }
+                }}
+                className="mt-4 inline-flex items-center justify-center rounded-md px-4 py-2 text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 transition-colors"
+              >
+                Seed starter feed
+              </button>
+            ) : null}
           </>
         ) : (
           <>
@@ -220,6 +253,7 @@ export function MusicFeed({
           key={post._id}
           post={post}
           focusCommentId={post._id === focusPostId ? focusCommentId : null}
+          onNavigateToProfile={onNavigateToProfile}
         />
       ))}
 

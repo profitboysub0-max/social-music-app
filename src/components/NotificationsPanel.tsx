@@ -12,7 +12,16 @@ type NotificationsPanelProps = {
 
 type NotificationItem = {
   _id: Id<"notifications">;
-  type: "like" | "comment" | "follow" | "mention" | "repost" | "system_update";
+  type:
+    | "like"
+    | "comment"
+    | "follow"
+    | "mention"
+    | "repost"
+    | "share"
+    | "friend_listening"
+    | "network_trending"
+    | "system_update";
   postId?: Id<"posts">;
   commentId?: Id<"comments">;
   profileId?: Id<"users">;
@@ -49,7 +58,23 @@ function getNotificationIcon(type: string) {
   if (type === "follow") return "👥";
   if (type === "mention") return "@";
   if (type === "repost") return "🔁";
+  if (type === "share") return "📤";
+  if (type === "friend_listening") return "🎧";
+  if (type === "network_trending") return "📈";
   return "⚙️";
+}
+
+function urlBase64ToUint8Array(base64String: string) {
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const rawData = window.atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+
+  for (let i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+
+  return outputArray;
 }
 
 function getTimeGroup(timestamp: number): "Today" | "This week" | "Older" {
@@ -98,8 +123,88 @@ export function NotificationsPanel({
     | undefined;
   const recentFollowers = useQuery(api.social.getRecentFollowers, { withinDays: 30 });
   const unreadCount = useQuery(api.social.getUnreadNotificationCount);
+  const pushStatus = useQuery(api.notifications.getPushStatus);
+  const webPushPublicKey = useQuery(api.notifications.getWebPushPublicKey);
+  const upsertPushSubscription = useMutation(api.notifications.upsertPushSubscription);
+  const deletePushSubscription = useMutation(api.notifications.deletePushSubscription);
   const markAllAsRead = useMutation(api.social.markAllNotificationsAsRead);
   const markAsRead = useMutation(api.social.markNotificationAsRead);
+  const [isPushWorking, setIsPushWorking] = useState(false);
+  const [pushError, setPushError] = useState<string | null>(null);
+
+  const browserPushSupported =
+    typeof window !== "undefined" &&
+    "Notification" in window &&
+    "serviceWorker" in navigator &&
+    "PushManager" in window;
+
+  const enablePushNotifications = async () => {
+    if (!browserPushSupported) {
+      setPushError("Push notifications are not supported in this browser.");
+      return;
+    }
+    if (!webPushPublicKey) {
+      setPushError("Push key is not configured yet.");
+      return;
+    }
+
+    try {
+      setPushError(null);
+      setIsPushWorking(true);
+      const permission = await Notification.requestPermission();
+      if (permission !== "granted") {
+        setPushError("Notification permission was not granted.");
+        return;
+      }
+
+      const registration = await navigator.serviceWorker.register("/push-sw.js");
+      const existing = await registration.pushManager.getSubscription();
+      const subscription =
+        existing ||
+        (await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(webPushPublicKey),
+        }));
+
+      const json = subscription.toJSON();
+      const endpoint = subscription.endpoint;
+      const p256dh = json.keys?.p256dh;
+      const auth = json.keys?.auth;
+      if (!endpoint || !p256dh || !auth) {
+        throw new Error("Browser returned an invalid push subscription.");
+      }
+
+      await upsertPushSubscription({
+        endpoint,
+        p256dh,
+        auth,
+        userAgent: navigator.userAgent,
+      });
+    } catch (error) {
+      setPushError(error instanceof Error ? error.message : "Failed to enable push notifications.");
+    } finally {
+      setIsPushWorking(false);
+    }
+  };
+
+  const disablePushNotifications = async () => {
+    if (!browserPushSupported) return;
+    try {
+      setPushError(null);
+      setIsPushWorking(true);
+      const registration = await navigator.serviceWorker.ready;
+      const subscription = await registration.pushManager.getSubscription();
+      if (subscription) {
+        const endpoint = subscription.endpoint;
+        await subscription.unsubscribe();
+        await deletePushSubscription({ endpoint });
+      }
+    } catch (error) {
+      setPushError(error instanceof Error ? error.message : "Failed to disable push notifications.");
+    } finally {
+      setIsPushWorking(false);
+    }
+  };
 
   const hasMore = useMemo(
     () => !!notifications && notifications.length >= visibleCount,
@@ -133,7 +238,9 @@ export function NotificationsPanel({
       (notification.type === "like" ||
         notification.type === "comment" ||
         notification.type === "mention" ||
-        notification.type === "repost") &&
+        notification.type === "repost" ||
+        notification.type === "share" ||
+        notification.type === "network_trending") &&
       notification.postId
     ) {
       onNavigateToPost(notification.postId, notification.commentId ?? null);
@@ -162,17 +269,36 @@ export function NotificationsPanel({
         <div>
           <h2 className="text-xl font-semibold text-gray-900">Notifications</h2>
           <p className="text-sm text-gray-600 mt-1">
-            Likes, comments, follows, mentions, reposts, and system updates from the last 30 days.
+            Likes, follows, trending alerts, listening activity, and more from the last 30 days.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => markAllAsRead({})}
-          disabled={!unreadCount}
-          className="px-3 py-2 rounded-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          Mark all as read
-        </button>
+        <div className="flex flex-col items-end gap-2">
+          <button
+            type="button"
+            onClick={() => markAllAsRead({})}
+            disabled={!unreadCount}
+            className="px-3 py-2 rounded-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Mark all as read
+          </button>
+          {pushStatus?.supported ? (
+            <button
+              type="button"
+              onClick={pushStatus.hasSubscription ? disablePushNotifications : enablePushNotifications}
+              disabled={isPushWorking}
+              className="px-3 py-1.5 rounded-lg border border-blue-200 text-xs font-medium text-blue-700 hover:bg-blue-50 disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {isPushWorking
+                ? "Updating..."
+                : pushStatus.hasSubscription
+                  ? "Disable push alerts"
+                  : "Enable push alerts"}
+            </button>
+          ) : (
+            <span className="text-xs text-gray-500">Push alerts unavailable (server not configured).</span>
+          )}
+          {pushError ? <span className="text-xs text-red-600">{pushError}</span> : null}
+        </div>
       </div>
 
       {notifications.length === 0 ? (

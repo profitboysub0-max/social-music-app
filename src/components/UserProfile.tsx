@@ -6,6 +6,11 @@ import { toast } from "sonner";
 import { PostCard } from "./PostCard";
 import { ProfileAvatarUpload } from "./ProfileAvatarUpload";
 
+function formatDayLabel(isoDate: string) {
+  const date = new Date(isoDate);
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
 export function UserProfile() {
   const { isLoading: authLoading } = useConvexAuth();
   const [isEditing, setIsEditing] = useState(false);
@@ -28,6 +33,11 @@ export function UserProfile() {
     api.social.getFollowStats,
     currentUser ? { userId: currentUser._id } : "skip"
   );
+  const myPresence = useQuery(
+    api.player.getUserPresence,
+    currentUser ? { userId: currentUser._id } : "skip"
+  );
+  const creatorAnalytics = useQuery(api.posts.getCreatorAnalytics, {});
 
   const updateProfile = useMutation(api.profiles.updateProfile);
 
@@ -158,6 +168,17 @@ export function UserProfile() {
                   </button>
                 </div>
                 {profile?.bio && <p className="text-gray-700">{profile.bio}</p>}
+                {myPresence?.isActive && myPresence.trackTitle ? (
+                  <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 text-sm font-medium">
+                    <span>🟢</span>
+                    <span>Listening now: {myPresence.trackTitle}</span>
+                  </div>
+                ) : (
+                  <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-gray-100 text-gray-600 text-sm">
+                    <span>⚪</span>
+                    <span>Not currently listening</span>
+                  </div>
+                )}
                 <div className="text-sm text-gray-600">📧 {currentUser.email}</div>
                 {followStats && (
                   <div className="flex gap-4 text-sm">
@@ -173,6 +194,145 @@ export function UserProfile() {
             )}
           </div>
         </div>
+      </div>
+
+      {/* Creator Analytics */}
+      <div className="bg-white rounded-lg shadow-sm border p-6 space-y-6">
+        <div>
+          <h2 className="text-xl font-semibold text-gray-900">Creator Dashboard</h2>
+          <p className="text-sm text-gray-600 mt-1">
+            Play counts, listener stats, top tracks, and profile analytics.
+          </p>
+        </div>
+
+        {!creatorAnalytics ? (
+          <div className="flex justify-center py-6">
+            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600" />
+          </div>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div className="rounded-lg border border-blue-100 bg-blue-50 p-3">
+                <div className="text-xs text-blue-700 font-medium">Total plays</div>
+                <div className="text-xl font-bold text-blue-900">{creatorAnalytics.overview.totalPlays}</div>
+              </div>
+              <div className="rounded-lg border border-emerald-100 bg-emerald-50 p-3">
+                <div className="text-xs text-emerald-700 font-medium">Unique listeners (30d)</div>
+                <div className="text-xl font-bold text-emerald-900">
+                  {creatorAnalytics.listenerStats.uniqueListenersInRange}
+                </div>
+              </div>
+              <div className="rounded-lg border border-amber-100 bg-amber-50 p-3">
+                <div className="text-xs text-amber-700 font-medium">Avg plays / track</div>
+                <div className="text-xl font-bold text-amber-900">
+                  {creatorAnalytics.overview.avgPlaysPerTrack}
+                </div>
+              </div>
+              <div className="rounded-lg border border-violet-100 bg-violet-50 p-3">
+                <div className="text-xs text-violet-700 font-medium">Followers</div>
+                <div className="text-xl font-bold text-violet-900">
+                  {creatorAnalytics.overview.totalFollowers}
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <h3 className="text-sm font-semibold text-gray-900">Listener stats ({creatorAnalytics.listenerStats.rangeDays}d)</h3>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                <div className="rounded-lg border p-3">
+                  <div className="text-gray-500">Plays in range</div>
+                  <div className="font-semibold text-gray-900">{creatorAnalytics.listenerStats.playsInRange}</div>
+                </div>
+                <div className="rounded-lg border p-3">
+                  <div className="text-gray-500">Listeners in range</div>
+                  <div className="font-semibold text-gray-900">{creatorAnalytics.listenerStats.uniqueListenersInRange}</div>
+                </div>
+                <div className="rounded-lg border p-3">
+                  <div className="text-gray-500">Plays (7d)</div>
+                  <div className="font-semibold text-gray-900">{creatorAnalytics.listenerStats.playsInLast7Days}</div>
+                </div>
+                <div className="rounded-lg border p-3">
+                  <div className="text-gray-500">Listeners (7d)</div>
+                  <div className="font-semibold text-gray-900">{creatorAnalytics.listenerStats.uniqueListenersInLast7Days}</div>
+                </div>
+              </div>
+              <div className="grid grid-cols-5 md:grid-cols-10 gap-1 h-24 items-end">
+                {creatorAnalytics.listenerStats.daily.map((entry) => {
+                  const maxPlays = Math.max(
+                    1,
+                    ...creatorAnalytics.listenerStats.daily.map((item) => item.plays)
+                  );
+                  const heightPercent = Math.max(6, Math.round((entry.plays / maxPlays) * 100));
+                  return (
+                    <div key={entry.date} className="group flex flex-col items-center justify-end">
+                      <div
+                        className="w-full rounded-t bg-blue-500/80 hover:bg-blue-600 transition-colors"
+                        style={{ height: `${heightPercent}%` }}
+                        title={`${formatDayLabel(entry.date)}: ${entry.plays} plays, ${entry.uniqueListeners} listeners`}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <h3 className="text-sm font-semibold text-gray-900">Top tracks</h3>
+              {creatorAnalytics.topTracks.length === 0 ? (
+                <div className="text-sm text-gray-600 rounded-lg border p-3">
+                  No track posts yet. Share songs or playlists to populate this dashboard.
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {creatorAnalytics.topTracks.map((track, index) => (
+                    <div key={track.postId} className="rounded-lg border p-3 flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="text-xs text-gray-500">#{index + 1} {track.type}</div>
+                        <div className="font-medium text-gray-900 truncate">{track.title}</div>
+                      </div>
+                      <div className="text-xs md:text-sm text-gray-700 flex items-center gap-3">
+                        <span>▶ {track.playCount}</span>
+                        <span>❤️ {track.likesCount}</span>
+                        <span>💬 {track.commentsCount}</span>
+                        <span>🔁 {track.repostsCount}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <h3 className="text-sm font-semibold text-gray-900">Profile analytics</h3>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                <div className="rounded-lg border p-3">
+                  <div className="text-gray-500">Posts</div>
+                  <div className="font-semibold text-gray-900">{creatorAnalytics.overview.totalPosts}</div>
+                </div>
+                <div className="rounded-lg border p-3">
+                  <div className="text-gray-500">Track posts</div>
+                  <div className="font-semibold text-gray-900">{creatorAnalytics.overview.totalTrackPosts}</div>
+                </div>
+                <div className="rounded-lg border p-3">
+                  <div className="text-gray-500">Engagement rate</div>
+                  <div className="font-semibold text-gray-900">{creatorAnalytics.overview.engagementRate}%</div>
+                </div>
+                <div className="rounded-lg border p-3">
+                  <div className="text-gray-500">New followers (30d)</div>
+                  <div className="font-semibold text-gray-900">{creatorAnalytics.profileAnalytics.recentFollowers30d}</div>
+                </div>
+                <div className="rounded-lg border p-3">
+                  <div className="text-gray-500">Active days ({creatorAnalytics.listenerStats.rangeDays}d)</div>
+                  <div className="font-semibold text-gray-900">{creatorAnalytics.profileAnalytics.activeDaysInRange}</div>
+                </div>
+                <div className="rounded-lg border p-3">
+                  <div className="text-gray-500">Avg daily plays</div>
+                  <div className="font-semibold text-gray-900">{creatorAnalytics.profileAnalytics.avgDailyPlaysInRange}</div>
+                </div>
+              </div>
+            </div>
+          </>
+        )}
       </div>
 
       {/* User Posts */}
