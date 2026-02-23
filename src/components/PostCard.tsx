@@ -48,6 +48,8 @@ export function PostCard({
   const toggleRepost = useMutation(api.posts.toggleRepost);
   const recordPlay = useMutation(api.posts.recordPlay);
   const saveSongFromPost = useMutation(api.playlists.saveSongFromPost);
+  const sendCreatorTip = useMutation(api.monetization.sendCreatorTip);
+  const trackAdEvent = useMutation(api.monetization.trackAdEvent);
   const addTrackToPlaylist = useMutation(api.playlists.addTrackToPlaylist);
   const createShareReference = useMutation(api.posts.createShareReference);
   const addComment = useMutation(api.posts.addComment);
@@ -59,6 +61,7 @@ export function PostCard({
   const writablePlaylists = useQuery(api.playlists.getWritablePlaylists);
   const currentUser = useQuery(api.auth.loggedInUser);
   const isGuest = !!(currentUser as { isAnonymous?: boolean } | null)?.isAnonymous;
+  const canUseMiniPlayer = !!currentUser && !isGuest;
   const comments = useQuery(api.posts.getComments, { postId: post._id });
 
   const { play } = usePlayer();
@@ -67,6 +70,7 @@ export function PostCard({
   const [commentText, setCommentText] = useState("");
   const [isSubmittingComment, setIsSubmittingComment] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [hasTrackedAdImpression, setHasTrackedAdImpression] = useState(false);
 
   const hasFocusedComment = useMemo(
     () => !!focusCommentId && comments?.some((comment) => comment._id === focusCommentId),
@@ -84,6 +88,16 @@ export function PostCard({
     }, 150);
     return () => clearTimeout(timeout);
   }, [focusCommentId, hasFocusedComment]);
+
+  useEffect(() => {
+    if (hasTrackedAdImpression) return;
+    setHasTrackedAdImpression(true);
+    void trackAdEvent({
+      creatorId: post.author.id,
+      eventType: "impression",
+      placement: "post_card",
+    }).catch(() => undefined);
+  }, [hasTrackedAdImpression, post.author.id, trackAdEvent]);
 
   const handleLike = async () => {
     if (isGuest) {
@@ -218,6 +232,10 @@ export function PostCard({
 
   const handleMusicClick = (url: string) => {
     if (!url) return;
+    if (!canUseMiniPlayer) {
+      toast.error("Sign up or sign in to use the mini player.");
+      return;
+    }
     void recordPlay({ postId: post._id, trackUrl: url }).catch(() => undefined);
 
     if (isDirectAudioUrl(url)) {
@@ -409,6 +427,48 @@ export function PostCard({
     }
   };
 
+  const handleTipCreator = async () => {
+    if (isGuest) {
+      toast.error("Create an account to tip creators.");
+      return;
+    }
+    if (currentUser?._id === post.author.id) {
+      toast.error("You can't tip yourself.");
+      return;
+    }
+
+    const amountInput = window.prompt("Tip amount in dollars (example: 2 or 5):", "2");
+    if (!amountInput) return;
+    const amountDollars = Number(amountInput);
+    if (!Number.isFinite(amountDollars) || amountDollars <= 0) {
+      toast.error("Enter a valid amount.");
+      return;
+    }
+    const amountCents = Math.round(amountDollars * 100);
+
+    const message = window.prompt("Optional message to creator:", "") || undefined;
+    try {
+      await sendCreatorTip({
+        creatorId: post.author.id,
+        amountCents,
+        message: message?.trim() || undefined,
+        postId: post._id,
+      });
+      toast.success(`Sent $${(amountCents / 100).toFixed(2)} tip to ${post.author.displayName}.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to send tip");
+    }
+  };
+
+  const handleSponsoredClick = async () => {
+    void trackAdEvent({
+      creatorId: post.author.id,
+      eventType: "click",
+      placement: "post_card",
+    }).catch(() => undefined);
+    window.open("https://www.spotify.com/premium/", "_blank", "noopener,noreferrer");
+  };
+
 
   return (
     <div id={`post-${post._id}`} className="bg-white rounded-lg shadow-sm border p-6 space-y-4">
@@ -471,7 +531,8 @@ export function PostCard({
               <button
                 type="button"
                 onClick={() => handleMusicClick(post.spotifyUrl!)}
-                className="inline-flex items-center gap-1 px-3 py-1 bg-green-100 text-green-700 rounded-full text-sm font-medium hover:bg-green-200 transition-colors"
+                disabled={!canUseMiniPlayer}
+                className="inline-flex items-center gap-1 px-3 py-1 bg-green-100 text-green-700 rounded-full text-sm font-medium hover:bg-green-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 🎵 Spotify
               </button>
@@ -480,7 +541,8 @@ export function PostCard({
               <button
                 type="button"
                 onClick={() => handleMusicClick(post.appleMusicUrl!)}
-                className="inline-flex items-center gap-1 px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm font-medium hover:bg-gray-200 transition-colors"
+                disabled={!canUseMiniPlayer}
+                className="inline-flex items-center gap-1 px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm font-medium hover:bg-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 🍎 Apple Music
               </button>
@@ -489,7 +551,8 @@ export function PostCard({
               <button
                 type="button"
                 onClick={() => handleMusicClick(post.youtubeUrl!)}
-                className="inline-flex items-center gap-1 px-3 py-1 bg-red-100 text-red-700 rounded-full text-sm font-medium hover:bg-red-200 transition-colors"
+                disabled={!canUseMiniPlayer}
+                className="inline-flex items-center gap-1 px-3 py-1 bg-red-100 text-red-700 rounded-full text-sm font-medium hover:bg-red-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 📺 Play on YouTube
               </button>
@@ -607,6 +670,30 @@ export function PostCard({
           </button>
         ) : null}
 
+        {currentUser?._id !== post.author.id ? (
+          <button
+            onClick={handleTipCreator}
+            className="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-amber-700 bg-amber-50 hover:bg-amber-100 transition-colors shrink-0"
+          >
+            <span className="text-lg">💸</span>
+            <span className="font-medium text-sm">Tip creator</span>
+          </button>
+        ) : null}
+
+      </div>
+
+      <div className="rounded-lg border border-indigo-100 bg-indigo-50 px-3 py-2 flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-xs font-semibold text-indigo-700 uppercase tracking-wide">Sponsored</p>
+          <p className="text-sm text-indigo-900 truncate">Upgrade your streaming with Premium audio quality.</p>
+        </div>
+        <button
+          type="button"
+          onClick={handleSponsoredClick}
+          className="px-3 py-1.5 text-xs font-semibold rounded-md bg-indigo-600 text-white hover:bg-indigo-700"
+        >
+          Learn more
+        </button>
       </div>
 
       <div className="space-y-3 border-t pt-4">

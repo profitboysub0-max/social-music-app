@@ -14,6 +14,7 @@ function formatDayLabel(isoDate: string) {
 export function UserProfile() {
   const { isLoading: authLoading } = useConvexAuth();
   const [isEditing, setIsEditing] = useState(false);
+  const [activeFollowList, setActiveFollowList] = useState<"followers" | "following" | null>(null);
   const [displayName, setDisplayName] = useState("");
   const [bio, setBio] = useState("");
   const [isPublic, setIsPublic] = useState(true);
@@ -33,11 +34,20 @@ export function UserProfile() {
     api.social.getFollowStats,
     currentUser ? { userId: currentUser._id } : "skip"
   );
+  const followers = useQuery(
+    api.social.getFollowers,
+    currentUser ? { userId: currentUser._id } : "skip"
+  );
+  const following = useQuery(
+    api.social.getFollowing,
+    currentUser ? { userId: currentUser._id } : "skip"
+  );
   const myPresence = useQuery(
     api.player.getUserPresence,
     currentUser ? { userId: currentUser._id } : "skip"
   );
   const creatorAnalytics = useQuery(api.posts.getCreatorAnalytics, {});
+  const monetizationSummary = useQuery(api.monetization.getCreatorMonetizationSummary, { days: 30 });
 
   const updateProfile = useMutation(api.profiles.updateProfile);
 
@@ -87,6 +97,8 @@ export function UserProfile() {
 
   // Resolve Convex storage URL for uploaded avatars.
   const avatarUrl = uploadedAvatarUrl || currentUser.avatarUrl || null;
+  const activeList = activeFollowList === "followers" ? followers : following;
+  const activeListTitle = activeFollowList === "followers" ? "Followers" : "Following";
 
   return (
     <div className="space-y-6">
@@ -182,12 +194,20 @@ export function UserProfile() {
                 <div className="text-sm text-gray-600">📧 {currentUser.email}</div>
                 {followStats && (
                   <div className="flex gap-4 text-sm">
-                    <span>
+                    <button
+                      type="button"
+                      onClick={() => setActiveFollowList("followers")}
+                      className="hover:text-blue-600 transition-colors"
+                    >
                       <strong>{followStats.followersCount}</strong> followers
-                    </span>
-                    <span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setActiveFollowList("following")}
+                      className="hover:text-blue-600 transition-colors"
+                    >
                       <strong>{followStats.followingCount}</strong> following
-                    </span>
+                    </button>
                   </div>
                 )}
               </div>
@@ -195,6 +215,78 @@ export function UserProfile() {
           </div>
         </div>
       </div>
+
+      {activeFollowList ? (
+        <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 px-4 pt-4">
+          <div className="w-full max-w-md rounded-xl bg-white shadow-xl border">
+            <div className="flex items-center justify-between px-4 py-3 border-b">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setActiveFollowList("followers")}
+                  className={`px-3 py-1.5 rounded-md text-sm font-medium ${
+                    activeFollowList === "followers"
+                      ? "bg-blue-100 text-blue-700"
+                      : "text-gray-600 hover:bg-gray-100"
+                  }`}
+                >
+                  Followers
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveFollowList("following")}
+                  className={`px-3 py-1.5 rounded-md text-sm font-medium ${
+                    activeFollowList === "following"
+                      ? "bg-blue-100 text-blue-700"
+                      : "text-gray-600 hover:bg-gray-100"
+                  }`}
+                >
+                  Following
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActiveFollowList(null)}
+                className="text-gray-500 hover:text-gray-800"
+              >
+                Close
+              </button>
+            </div>
+            <div className="max-h-[60vh] overflow-y-auto p-2">
+              {!activeList ? (
+                <div className="flex justify-center py-6">
+                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600" />
+                </div>
+              ) : activeList.length === 0 ? (
+                <div className="p-4 text-sm text-gray-600 text-center">
+                  No {activeListTitle.toLowerCase()} yet.
+                </div>
+              ) : (
+                <ul className="divide-y">
+                  {activeList.map((person) => {
+                    const personAvatarUrl = person.avatarUrl || null;
+                    const initial = person.displayName.charAt(0).toUpperCase();
+                    return (
+                      <li key={person.userId} className="flex items-center gap-3 px-2 py-3">
+                        <div className="h-10 w-10 rounded-full overflow-hidden bg-gradient-to-br from-blue-500 to-indigo-600 text-white flex items-center justify-center font-semibold">
+                          {personAvatarUrl ? (
+                            <img src={personAvatarUrl} alt={person.displayName} className="h-full w-full object-cover" />
+                          ) : (
+                            initial
+                          )}
+                        </div>
+                        <div className="min-w-0">
+                          <p className="font-medium text-gray-900 truncate">{person.displayName}</p>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {/* Creator Analytics */}
       <div className="bg-white rounded-lg shadow-sm border p-6 space-y-6">
@@ -332,6 +424,48 @@ export function UserProfile() {
               </div>
             </div>
           </>
+        )}
+      </div>
+
+      <div className="bg-white rounded-lg shadow-sm border p-6 space-y-4">
+        <div>
+          <h2 className="text-xl font-semibold text-gray-900">Creator Monetization</h2>
+          <p className="text-sm text-gray-600 mt-1">
+            Modeled Revenue (Beta) from tips and sponsored placements (last 30 days).
+          </p>
+        </div>
+
+        {!monetizationSummary ? (
+          <div className="flex justify-center py-6">
+            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600" />
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+            <div className="rounded-lg border border-amber-100 bg-amber-50 p-3">
+              <div className="text-xs text-amber-700 font-medium">Estimated tip earnings</div>
+              <div className="text-xl font-bold text-amber-900">${monetizationSummary.tips.totalTipsUsd.toFixed(2)}</div>
+            </div>
+            <div className="rounded-lg border border-emerald-100 bg-emerald-50 p-3">
+              <div className="text-xs text-emerald-700 font-medium">Tips count</div>
+              <div className="text-xl font-bold text-emerald-900">{monetizationSummary.tips.tipsCount}</div>
+            </div>
+            <div className="rounded-lg border border-sky-100 bg-sky-50 p-3">
+              <div className="text-xs text-sky-700 font-medium">Ad impressions</div>
+              <div className="text-xl font-bold text-sky-900">{monetizationSummary.ads.impressions}</div>
+            </div>
+            <div className="rounded-lg border border-violet-100 bg-violet-50 p-3">
+              <div className="text-xs text-violet-700 font-medium">Ad clicks (CTR)</div>
+              <div className="text-xl font-bold text-violet-900">
+                {monetizationSummary.ads.clicks} ({monetizationSummary.ads.ctrPercent.toFixed(2)}%)
+              </div>
+            </div>
+            <div className="rounded-lg border border-indigo-100 bg-indigo-50 p-3">
+              <div className="text-xs text-indigo-700 font-medium">Projected revenue</div>
+              <div className="text-xl font-bold text-indigo-900">
+                ${monetizationSummary.totalEstimatedRevenueUsd.toFixed(2)}
+              </div>
+            </div>
+          </div>
         )}
       </div>
 

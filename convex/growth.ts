@@ -1,5 +1,5 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
-import { mutation } from "./_generated/server";
+import { mutation, query } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { Id } from "./_generated/dataModel";
 
@@ -36,6 +36,199 @@ async function getSeedUserIds(ctx: any, excludeUserId: Id<"users">) {
     })
     .map((user: any) => user._id as Id<"users">);
 }
+
+function getAuthorizedInvestorEmails() {
+  const defaults = ["profitboysub0@gmail.com"];
+  const raw = (process.env.INVESTOR_DASHBOARD_EMAILS || "").trim();
+  if (!raw) return new Set(defaults);
+
+  const merged = raw
+    .split(",")
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean);
+  for (const email of defaults) merged.push(email);
+  return new Set(merged);
+}
+
+function pctChange(current: number, previous: number) {
+  if (previous <= 0) return current > 0 ? 100 : 0;
+  return ((current - previous) / previous) * 100;
+}
+
+function summarizeMiniPlayerPeriod(
+  playEvents: Array<{ playedAt: number; listenerId: Id<"users"> }>,
+  userById: Map<string, { isAnonymous?: boolean }>,
+  startMs: number,
+  endMs: number,
+) {
+  const uniqueVisitors = new Set<string>();
+  const uniqueRegisteredUsers = new Set<string>();
+  let totalPlays = 0;
+
+  for (const event of playEvents) {
+    if (event.playedAt < startMs || event.playedAt >= endMs) continue;
+    totalPlays += 1;
+
+    const listenerKey = String(event.listenerId);
+    const listener = userById.get(listenerKey);
+    if (listener?.isAnonymous) {
+      uniqueVisitors.add(listenerKey);
+    } else {
+      uniqueRegisteredUsers.add(listenerKey);
+    }
+  }
+
+  return {
+    totalPlays,
+    uniqueVisitors: uniqueVisitors.size,
+    uniqueUsers: uniqueRegisteredUsers.size,
+    totalUniqueListeners: uniqueVisitors.size + uniqueRegisteredUsers.size,
+  };
+}
+
+async function collectActiveUserIdsSince(ctx: any, sinceMs: number) {
+  const active = new Set<Id<"users">>();
+
+  const posts = await ctx.db.query("posts").collect();
+  for (const post of posts) {
+    if (post._creationTime >= sinceMs) active.add(post.authorId);
+  }
+
+  const comments = await ctx.db.query("comments").collect();
+  for (const comment of comments) {
+    if (comment._creationTime >= sinceMs) active.add(comment.authorId);
+  }
+
+  const likes = await ctx.db.query("likes").collect();
+  for (const like of likes) {
+    if (like._creationTime >= sinceMs) active.add(like.userId);
+  }
+
+  const reposts = await ctx.db.query("reposts").collect();
+  for (const repost of reposts) {
+    if (repost._creationTime >= sinceMs) active.add(repost.userId);
+  }
+
+  const messages = await ctx.db.query("messages").collect();
+  for (const message of messages) {
+    if (message._creationTime >= sinceMs) active.add(message.senderId);
+  }
+
+  const playEvents = await ctx.db.query("playEvents").collect();
+  for (const event of playEvents) {
+    if (event.playedAt >= sinceMs) active.add(event.listenerId);
+  }
+
+  const presence = await ctx.db.query("userPresence").collect();
+  for (const row of presence) {
+    if (row.lastSeenAt >= sinceMs) active.add(row.userId);
+  }
+
+  return active;
+}
+
+export const getInvestorDashboardMetrics = query({
+  args: {},
+  handler: async (ctx) => {
+    const authUserId = await getAuthUserId(ctx);
+    if (!authUserId) throw new Error("Not authenticated");
+
+    const user = await ctx.db.get(authUserId);
+    const email = String(user?.email || "").trim().toLowerCase();
+    if (!email || !getAuthorizedInvestorEmails().has(email)) {
+      throw new Error("Not authorized to view investor dashboard");
+    }
+
+    const now = Date.now();
+    const dayMs = 24 * 60 * 60 * 1000;
+    const dauSince = now - dayMs;
+    const mauSince = now - 30 * dayMs;
+    const thisWeekSince = now - 7 * dayMs;
+    const prevWeekSince = now - 14 * dayMs;
+
+    const users = await ctx.db.query("users").collect();
+    const registeredUsers = users.filter((candidate: any) => !candidate?.isAnonymous);
+    const registeredUserIdSet = new Set(registeredUsers.map((candidate: any) => String(candidate._id)));
+
+    const rawDauIds = await collectActiveUserIdsSince(ctx, dauSince);
+    const rawMauIds = await collectActiveUserIdsSince(ctx, mauSince);
+    const dauIds = new Set(
+      Array.from(rawDauIds).filter((userId) => registeredUserIdSet.has(String(userId))),
+    );
+    const mauIds = new Set(
+      Array.from(rawMauIds).filter((userId) => registeredUserIdSet.has(String(userId))),
+    );
+
+    const totalUsers = registeredUserIdSet.size;
+    const weeklyNewUsers = registeredUsers.filter((candidate: any) => candidate._creationTime >= thisWeekSince).length;
+    const previousWeeklyNewUsers = registeredUsers.filter(
+      (candidate: any) => candidate._creationTime >= prevWeekSince && candidate._creationTime < thisWeekSince,
+    ).length;
+
+    const dau = Math.min(dauIds.size, totalUsers);
+    const mau = Math.min(mauIds.size, totalUsers);
+
+    return {
+      totalUsers,
+      dau,
+      mau,
+      dauMauRatioPercent: mau > 0 ? (dau / mau) * 100 : 0,
+      weeklyGrowthPercent: pctChange(weeklyNewUsers, previousWeeklyNewUsers),
+      weeklyNewUsers,
+      previousWeeklyNewUsers,
+      calculatedAt: now,
+    };
+  },
+});
+
+export const getMiniPlayerGrowthMetrics = query({
+  args: {},
+  handler: async (ctx) => {
+    const authUserId = await getAuthUserId(ctx);
+    if (!authUserId) throw new Error("Not authenticated");
+
+    const user = await ctx.db.get(authUserId);
+    const email = String(user?.email || "").trim().toLowerCase();
+    if (!email || !getAuthorizedInvestorEmails().has(email)) {
+      throw new Error("Not authorized to view investor dashboard");
+    }
+
+    const now = Date.now();
+    const dayMs = 24 * 60 * 60 * 1000;
+    const currentStart = now - 7 * dayMs;
+    const previousStart = now - 14 * dayMs;
+    const last30Start = now - 30 * dayMs;
+
+    const [users, playEvents] = await Promise.all([
+      ctx.db.query("users").collect(),
+      ctx.db.query("playEvents").collect(),
+    ]);
+
+    const userById = new Map(
+      users.map((candidate: any) => [String(candidate._id), { isAnonymous: !!candidate?.isAnonymous }]),
+    );
+
+    const current7d = summarizeMiniPlayerPeriod(playEvents, userById, currentStart, now);
+    const previous7d = summarizeMiniPlayerPeriod(playEvents, userById, previousStart, currentStart);
+    const last30d = summarizeMiniPlayerPeriod(playEvents, userById, last30Start, now);
+
+    return {
+      current7d,
+      previous7d,
+      last30d,
+      growth: {
+        playsPercent: pctChange(current7d.totalPlays, previous7d.totalPlays),
+        visitorsPercent: pctChange(current7d.uniqueVisitors, previous7d.uniqueVisitors),
+        usersPercent: pctChange(current7d.uniqueUsers, previous7d.uniqueUsers),
+        totalUniquePercent: pctChange(
+          current7d.totalUniqueListeners,
+          previous7d.totalUniqueListeners,
+        ),
+      },
+      calculatedAt: now,
+    };
+  },
+});
 
 export const ensureSeedWarmWelcome = mutation({
   args: {},

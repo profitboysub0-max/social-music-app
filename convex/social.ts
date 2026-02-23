@@ -200,6 +200,7 @@ export const getFollowers = query({
           userId: follow.followerId,
           displayName: profile?.displayName || user?.name || "Anonymous",
           avatar: profile?.avatar,
+          avatarUrl: profile?.avatar ? await ctx.storage.getUrl(profile.avatar) : null,
         };
       }),
     );
@@ -226,6 +227,7 @@ export const getFollowing = query({
           userId: follow.followingId,
           displayName: profile?.displayName || user?.name || "Anonymous",
           avatar: profile?.avatar,
+          avatarUrl: profile?.avatar ? await ctx.storage.getUrl(profile.avatar) : null,
         };
       }),
     );

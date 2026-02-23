@@ -14,6 +14,7 @@ import type * as functions_files from "../functions/files.js";
 import type * as growth from "../growth.js";
 import type * as http from "../http.js";
 import type * as messages from "../messages.js";
+import type * as monetization from "../monetization.js";
 import type * as notifications from "../notifications.js";
 import type * as player from "../player.js";
 import type * as playlists from "../playlists.js";
@@ -36,6 +37,7 @@ declare const fullApi: ApiFromModules<{
   growth: typeof growth;
   http: typeof http;
   messages: typeof messages;
+  monetization: typeof monetization;
   notifications: typeof notifications;
   player: typeof player;
   playlists: typeof playlists;

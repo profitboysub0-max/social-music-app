@@ -200,6 +200,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const lastPersistRef = useRef(0);
 
   const persistedState = useQuery(api.player.getPlaybackState);
+  const currentUser = useQuery(api.auth.loggedInUser);
+  const isGuest = !!(currentUser as { isAnonymous?: boolean } | null)?.isAnonymous;
+  const canUploadToMiniPlayer = !!currentUser && !isGuest;
   const upsertPlaybackState = useMutation(api.player.upsertPlaybackState);
 
   useEffect(() => {
@@ -574,6 +577,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   };
 
   const addAudioFiles = (files: FileList | File[]) => {
+    if (!canUploadToMiniPlayer) {
+      window.alert("Sign up or sign in to upload tracks to Profit Boy's Mini Player.");
+      return;
+    }
     const wavFiles = Array.from(files).filter(isWavFile);
     if (!wavFiles.length) return;
     const additions: PlaylistTrack[] = wavFiles.map((file) => {
@@ -613,6 +620,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   };
 
   const importFromGoogleDrive = async () => {
+    if (!canUploadToMiniPlayer) {
+      window.alert("Sign up or sign in to upload tracks to Profit Boy's Mini Player.");
+      return;
+    }
     const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined;
     const apiKey = import.meta.env.VITE_GOOGLE_API_KEY as string | undefined;
     const appId = import.meta.env.VITE_GOOGLE_APP_ID as string | undefined;
@@ -823,7 +834,13 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
                 <div
                   role="button"
                   tabIndex={0}
-                  onClick={() => audioUploadInputRef.current?.click()}
+                  onClick={() => {
+                    if (!canUploadToMiniPlayer) {
+                      window.alert("Sign up or sign in to upload tracks to Profit Boy's Mini Player.");
+                      return;
+                    }
+                    audioUploadInputRef.current?.click();
+                  }}
                   onDragOver={(event) => {
                     event.preventDefault();
                     setIsAudioDragOver(true);
@@ -832,6 +849,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
                   onDrop={(event) => {
                     event.preventDefault();
                     setIsAudioDragOver(false);
+                    if (!canUploadToMiniPlayer) {
+                      window.alert("Sign up or sign in to upload tracks to Profit Boy's Mini Player.");
+                      return;
+                    }
                     if (event.dataTransfer.files?.length) addAudioFiles(event.dataTransfer.files);
                   }}
                   className={`rounded-xl border-2 border-dashed px-4 py-4 text-center text-sm cursor-pointer transition ${
@@ -840,7 +861,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
                       : "border-emerald-500/60 bg-emerald-900/30 hover:bg-emerald-800/30"
                   }`}
                 >
-                  Drop or Upload WAV Files
+                  {canUploadToMiniPlayer ? "Drop or Upload WAV Files" : "Sign in to upload WAV files"}
                 </div>
                 <div
                   role="button"
@@ -882,7 +903,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
                 <button type="button" onClick={togglePlayPause} disabled={!track} className="px-4 py-2 rounded-lg bg-emerald-500 text-black font-semibold hover:bg-emerald-400 disabled:opacity-50 disabled:cursor-not-allowed">{isPlaying ? "Pause" : "Play"}</button>
                 <button type="button" onClick={playNext} disabled={!playlist.length} className="px-3 py-2 rounded-lg bg-emerald-500 text-black font-semibold hover:bg-emerald-400 disabled:opacity-50 disabled:cursor-not-allowed">Next</button>
                 <button type="button" onClick={shareCurrentTrack} disabled={!track} className="px-3 py-2 rounded-lg border border-emerald-400/40 text-emerald-100 hover:bg-emerald-700/25 disabled:opacity-50 disabled:cursor-not-allowed">Share</button>
-                <button type="button" onClick={importFromGoogleDrive} disabled={isDriveImporting} className="px-3 py-2 rounded-lg border border-emerald-400/40 text-emerald-100 hover:bg-emerald-700/25 disabled:opacity-50 disabled:cursor-not-allowed">{isDriveImporting ? "Drive..." : "Drive WAV"}</button>
+                <button type="button" onClick={importFromGoogleDrive} disabled={isDriveImporting || !canUploadToMiniPlayer} className="px-3 py-2 rounded-lg border border-emerald-400/40 text-emerald-100 hover:bg-emerald-700/25 disabled:opacity-50 disabled:cursor-not-allowed">{isDriveImporting ? "Drive..." : "Drive WAV"}</button>
                 <label className="flex items-center gap-2 text-sm text-emerald-100/80">
                   Volume
                   <input type="range" min={0} max={1} step={0.01} value={volume} onChange={(event) => setVolume(Number(event.target.value))} className="accent-emerald-400" />
@@ -970,9 +991,14 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
               type="button"
               onClick={(event) => {
                 event.stopPropagation();
+                if (!canUploadToMiniPlayer) {
+                  window.alert("Sign up or sign in to upload tracks to Profit Boy's Mini Player.");
+                  return;
+                }
                 audioUploadInputRef.current?.click();
               }}
-              className="h-10 px-3 rounded-full border border-gray-200 text-xs font-semibold text-gray-700 bg-white hover:bg-gray-50"
+              disabled={!canUploadToMiniPlayer}
+              className="h-10 px-3 rounded-full border border-gray-200 text-xs font-semibold text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-60 disabled:cursor-not-allowed"
             >
               Upload
             </button>
@@ -982,7 +1008,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
                 event.stopPropagation();
                 void importFromGoogleDrive();
               }}
-              disabled={isDriveImporting}
+              disabled={isDriveImporting || !canUploadToMiniPlayer}
               className="h-10 px-3 rounded-full border border-gray-200 text-xs font-semibold text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-60 disabled:cursor-not-allowed"
             >
               {isDriveImporting ? "..." : "Drive"}

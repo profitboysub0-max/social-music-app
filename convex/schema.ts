@@ -237,6 +237,28 @@ const applicationTables = {
     isPlaying: v.boolean(),
     updatedAt: v.number(),
   }).index("by_user", ["userId"]),
+
+  creatorTips: defineTable({
+    creatorId: v.id("users"),
+    senderId: v.id("users"),
+    amountCents: v.number(),
+    message: v.optional(v.string()),
+    postId: v.optional(v.id("posts")),
+    createdAt: v.number(),
+  })
+    .index("by_creator_created", ["creatorId", "createdAt"])
+    .index("by_sender_created", ["senderId", "createdAt"]),
+
+  adEvents: defineTable({
+    creatorId: v.id("users"),
+    eventType: v.union(v.literal("impression"), v.literal("click")),
+    placement: v.string(),
+    viewerUserId: v.optional(v.id("users")),
+    viewerKind: v.union(v.literal("guest"), v.literal("member")),
+    createdAt: v.number(),
+  })
+    .index("by_creator_created", ["creatorId", "createdAt"])
+    .index("by_creator_type_created", ["creatorId", "eventType", "createdAt"]),
 };
 
 export default defineSchema({

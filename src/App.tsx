@@ -13,6 +13,9 @@ import { NotificationsPanel } from "./components/NotificationsPanel";
 import { SignOutButton } from "./SignOutButton";
 import { DirectMessages } from "./components/DirectMessages";
 import { PlaylistsPanel } from "./components/PlaylistsPanel";
+import { InvestorDashboard } from "./components/InvestorDashboard";
+
+const AUTHORIZED_INVESTOR_EMAILS = new Set(["profitboysub0@gmail.com"]);
 
 export default function App() {
   const convex = useConvex();
@@ -25,6 +28,7 @@ export default function App() {
     | "notifications"
     | "messages"
     | "playlists"
+    | "investor"
   >("home");
   const [focusedPostId, setFocusedPostId] = useState<Id<"posts"> | null>(null);
   const [focusedCommentId, setFocusedCommentId] = useState<Id<"comments"> | null>(null);
@@ -54,7 +58,8 @@ export default function App() {
       tab === "notifications" ||
       tab === "feed" ||
       tab === "search" ||
-      tab === "playlists"
+      tab === "playlists" ||
+      tab === "investor"
     ) {
       setActiveTab(tab);
     }
@@ -99,6 +104,10 @@ export default function App() {
   const unreadMessagesCount = useQuery(api.messages.getUnreadMessageCount);
   const isSignedIn = isAuthenticated || !!currentUser;
   const isGuest = !!(currentUser as { isAnonymous?: boolean } | null)?.isAnonymous;
+  const normalizedEmail = String((currentUser as { email?: string } | null)?.email || "")
+    .trim()
+    .toLowerCase();
+  const canViewInvestorDashboard = AUTHORIZED_INVESTOR_EMAILS.has(normalizedEmail);
   const showNav = isSignedIn;
   const notificationsCount = unreadNotificationsCount ?? 0;
   const messagesCount = unreadMessagesCount ?? 0;
@@ -204,6 +213,20 @@ export default function App() {
       return <PlaylistsPanel />;
     }
 
+    if (activeTab === "investor") {
+      if (!canViewInvestorDashboard) {
+        return (
+          <div className="bg-white rounded-lg shadow-sm border p-6 text-center">
+            <h2 className="text-xl font-semibold text-gray-900">Investor dashboard is restricted</h2>
+            <p className="text-gray-600 mt-2">
+              Sign in with your authorized Profit account to view investor metrics.
+            </p>
+          </div>
+        );
+      }
+      return <InvestorDashboard />;
+    }
+
     return <UserProfile />;
   };
 
@@ -278,6 +301,18 @@ export default function App() {
                 >
                   Playlists
                 </button>
+                {canViewInvestorDashboard ? (
+                  <button
+                    onClick={() => setActiveTab("investor")}
+                    className={`px-3 py-2 rounded-lg ${
+                      activeTab === "investor"
+                        ? "bg-blue-100 text-blue-700"
+                        : "text-gray-600 hover:text-gray-900"
+                    }`}
+                  >
+                    Investor
+                  </button>
+                ) : null}
                 <button
                   onClick={() => setActiveTab("profile")}
                   className={`px-3 py-2 rounded-lg ${
@@ -337,7 +372,7 @@ export default function App() {
             <div className="entrance-logo text-5xl md:text-6xl">🎵</div>
             <h1 className="entrance-text text-4xl font-bold">Put Me On</h1>
             <p className="entrance-text text-lg text-gray-700 mb-1 max-w-2xl mx-auto">
-              A social music app where you share tracks, discover new sounds, and see what friends are listening to in real time.
+              A social music app where you share tracks, discover new sounds, see what friends are listening to in real time and make money.
             </p>
             <div className="entrance-text max-w-2xl mx-auto text-left sm:text-center">
               <div className="inline-flex flex-col gap-2 text-sm text-gray-600">

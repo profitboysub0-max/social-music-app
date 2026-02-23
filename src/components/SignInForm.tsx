@@ -55,6 +55,9 @@ export function SignInForm() {
         <p className="text-sm text-gray-600 mt-1">
           Follow people, share songs, and build your daily listening habit.
         </p>
+        <p className="mt-3 inline-flex items-center justify-center rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
+          Sign up or sign in to use Profit Boy&apos;s Mini Player.
+        </p>
       </div>
       <form
         className="space-y-3"
