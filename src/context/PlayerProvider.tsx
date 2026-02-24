@@ -2,45 +2,6 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState, type R
 import { useMutation, useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 
-declare global {
-  interface Window {
-    gapi?: {
-      load: (name: string, callback: () => void) => void;
-    };
-    google?: {
-      accounts?: {
-        oauth2?: {
-          initTokenClient: (config: {
-            client_id: string;
-            scope: string;
-            callback: (response: { access_token?: string; error?: string }) => void;
-          }) => {
-            requestAccessToken: (options?: { prompt?: string }) => void;
-          };
-        };
-      };
-      picker?: {
-        Action: { PICKED: string; CANCEL: string };
-        Response: { ACTION: string; DOCUMENTS: string };
-        Document: { ID: string; NAME: string };
-        DocsView: new () => {
-          setIncludeFolders: (include: boolean) => unknown;
-          setSelectFolderEnabled: (enabled: boolean) => unknown;
-          setMimeTypes: (mimeTypes: string) => unknown;
-        };
-        PickerBuilder: new () => {
-          setDeveloperKey: (key: string) => unknown;
-          setAppId: (appId: string) => unknown;
-          setOAuthToken: (token: string) => unknown;
-          addView: (view: unknown) => unknown;
-          setCallback: (callback: (data: Record<string, unknown>) => void) => unknown;
-          build: () => { setVisible: (visible: boolean) => void };
-        };
-      };
-    };
-  }
-}
-
 type TrackInput =
   | string
   | {
@@ -72,37 +33,6 @@ type PlayerContextValue = {
 const PlayerContext = createContext<PlayerContextValue | null>(null);
 const VISUALIZER_BARS = 24;
 const MONEY_BILLS = 54;
-const GOOGLE_API_SCRIPT_SRC = "https://apis.google.com/js/api.js";
-const GOOGLE_IDENTITY_SCRIPT_SRC = "https://accounts.google.com/gsi/client";
-const DRIVE_READONLY_SCOPE = "https://www.googleapis.com/auth/drive.readonly";
-
-function loadExternalScript(src: string, id: string) {
-  return new Promise<void>((resolve, reject) => {
-    const existing = document.getElementById(id) as HTMLScriptElement | null;
-    if (existing) {
-      if (existing.dataset.loaded === "true") {
-        resolve();
-        return;
-      }
-      existing.addEventListener("load", () => resolve(), { once: true });
-      existing.addEventListener("error", () => reject(new Error(`Failed to load ${src}`)), { once: true });
-      return;
-    }
-
-    const script = document.createElement("script");
-    script.id = id;
-    script.src = src;
-    script.async = true;
-    script.defer = true;
-    script.onload = () => {
-      script.dataset.loaded = "true";
-      resolve();
-    };
-    script.onerror = () => reject(new Error(`Failed to load ${src}`));
-    document.head.appendChild(script);
-  });
-}
-
 function Visualizer({ bars, compact = false }: { bars: number[]; compact?: boolean }) {
   return (
     <div
@@ -192,7 +122,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const [highGain, setHighGain] = useState(0);
   const [isAudioDragOver, setIsAudioDragOver] = useState(false);
   const [isImageDragOver, setIsImageDragOver] = useState(false);
-  const [isDriveImporting, setIsDriveImporting] = useState(false);
   const [visualizerBars, setVisualizerBars] = useState<number[]>(
     Array.from({ length: VISUALIZER_BARS }, () => 0.12),
   );
@@ -619,121 +548,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     );
   };
 
-  const importFromGoogleDrive = async () => {
-    if (!canUploadToMiniPlayer) {
-      window.alert("Sign up or sign in to upload tracks to Profit Boy's Mini Player.");
-      return;
-    }
-    const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined;
-    const apiKey = import.meta.env.VITE_GOOGLE_API_KEY as string | undefined;
-    const appId = import.meta.env.VITE_GOOGLE_APP_ID as string | undefined;
-
-    if (!clientId || !apiKey || !appId) {
-      window.alert("Missing Google Drive config. Set VITE_GOOGLE_CLIENT_ID, VITE_GOOGLE_API_KEY, and VITE_GOOGLE_APP_ID.");
-      return;
-    }
-
-    const requestAccessToken = async () =>
-      new Promise<string>((resolve, reject) => {
-        const tokenClient = window.google?.accounts?.oauth2?.initTokenClient({
-          client_id: clientId,
-          scope: DRIVE_READONLY_SCOPE,
-          callback: (response) => {
-            if (response.error || !response.access_token) {
-              reject(new Error(response.error || "Could not authorize Google Drive access."));
-              return;
-            }
-            resolve(response.access_token);
-          },
-        });
-
-        if (!tokenClient) {
-          reject(new Error("Google Identity Services is unavailable."));
-          return;
-        }
-        tokenClient.requestAccessToken({ prompt: "consent" });
-      });
-
-    const pickDriveFile = async (token: string) =>
-      new Promise<{ id: string; name: string }>((resolve, reject) => {
-        const picker = window.google?.picker;
-        if (!picker) {
-          reject(new Error("Google Picker API is unavailable."));
-          return;
-        }
-
-        const docsView = new picker.DocsView()
-          .setIncludeFolders(false)
-          .setSelectFolderEnabled(false)
-          .setMimeTypes("audio/wav,audio/x-wav");
-
-        const builtPicker = new picker.PickerBuilder()
-          .setDeveloperKey(apiKey)
-          .setAppId(appId)
-          .setOAuthToken(token)
-          .addView(docsView)
-          .setCallback((data) => {
-            const action = String(data[picker.Response.ACTION] ?? "");
-            if (action === picker.Action.CANCEL) {
-              reject(new Error("Drive file picking was canceled."));
-              return;
-            }
-            if (action !== picker.Action.PICKED) return;
-            const docs = (data[picker.Response.DOCUMENTS] as Record<string, unknown>[] | undefined) || [];
-            const first = docs[0];
-            const id = String(first?.[picker.Document.ID] ?? "");
-            const name = String(first?.[picker.Document.NAME] ?? "drive-track.wav");
-            if (!id) {
-              reject(new Error("No Drive file selected."));
-              return;
-            }
-            resolve({ id, name });
-          })
-          .build();
-
-        builtPicker.setVisible(true);
-      });
-
-    try {
-      setIsDriveImporting(true);
-      await loadExternalScript(GOOGLE_API_SCRIPT_SRC, "google-api-script");
-      await loadExternalScript(GOOGLE_IDENTITY_SCRIPT_SRC, "google-identity-script");
-      await new Promise<void>((resolve, reject) => {
-        if (!window.gapi?.load) {
-          reject(new Error("Google API client failed to initialize."));
-          return;
-        }
-        window.gapi.load("picker", () => resolve());
-      });
-
-      const accessToken = await requestAccessToken();
-      const selected = await pickDriveFile(accessToken);
-      const mediaResponse = await fetch(
-        `https://www.googleapis.com/drive/v3/files/${selected.id}?alt=media&supportsAllDrives=true`,
-        {
-          headers: { Authorization: `Bearer ${accessToken}` },
-        },
-      );
-      if (!mediaResponse.ok) {
-        throw new Error("Failed to download the selected file from Google Drive.");
-      }
-
-      const blob = await mediaResponse.blob();
-      const normalizedName = selected.name.toLowerCase().endsWith(".wav") ? selected.name : `${selected.name}.wav`;
-      const wavFile = new File([blob], normalizedName, { type: blob.type || "audio/wav" });
-      if (!isWavFile(wavFile)) {
-        throw new Error("Selected file is not a WAV file.");
-      }
-      addAudioFiles([wavFile]);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Google Drive import failed.";
-      if (message.toLowerCase().includes("canceled")) return;
-      window.alert(message);
-    } finally {
-      setIsDriveImporting(false);
-    }
-  };
-
   const playNext = () => {
     if (!playlist.length) return;
     playPlaylistTrack(currentIndex >= 0 ? (currentIndex + 1) % playlist.length : 0);
@@ -903,7 +717,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
                 <button type="button" onClick={togglePlayPause} disabled={!track} className="px-4 py-2 rounded-lg bg-emerald-500 text-black font-semibold hover:bg-emerald-400 disabled:opacity-50 disabled:cursor-not-allowed">{isPlaying ? "Pause" : "Play"}</button>
                 <button type="button" onClick={playNext} disabled={!playlist.length} className="px-3 py-2 rounded-lg bg-emerald-500 text-black font-semibold hover:bg-emerald-400 disabled:opacity-50 disabled:cursor-not-allowed">Next</button>
                 <button type="button" onClick={shareCurrentTrack} disabled={!track} className="px-3 py-2 rounded-lg border border-emerald-400/40 text-emerald-100 hover:bg-emerald-700/25 disabled:opacity-50 disabled:cursor-not-allowed">Share</button>
-                <button type="button" onClick={importFromGoogleDrive} disabled={isDriveImporting || !canUploadToMiniPlayer} className="px-3 py-2 rounded-lg border border-emerald-400/40 text-emerald-100 hover:bg-emerald-700/25 disabled:opacity-50 disabled:cursor-not-allowed">{isDriveImporting ? "Drive..." : "Drive WAV"}</button>
                 <label className="flex items-center gap-2 text-sm text-emerald-100/80">
                   Volume
                   <input type="range" min={0} max={1} step={0.01} value={volume} onChange={(event) => setVolume(Number(event.target.value))} className="accent-emerald-400" />
@@ -1001,17 +814,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
               className="h-10 px-3 rounded-full border border-gray-200 text-xs font-semibold text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-60 disabled:cursor-not-allowed"
             >
               Upload
-            </button>
-            <button
-              type="button"
-              onClick={(event) => {
-                event.stopPropagation();
-                void importFromGoogleDrive();
-              }}
-              disabled={isDriveImporting || !canUploadToMiniPlayer}
-              className="h-10 px-3 rounded-full border border-gray-200 text-xs font-semibold text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-60 disabled:cursor-not-allowed"
-            >
-              {isDriveImporting ? "..." : "Drive"}
             </button>
             <button
               type="button"
